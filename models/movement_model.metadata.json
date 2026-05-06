@@ -1,5 +1,5 @@
 {
-  "model_version": "20260506115035",
+  "model_version": "20260506120759",
   "task_type": "movement",
   "horizon_days": 1,
   "symbols": [
@@ -2467,5 +2467,5 @@
   "classification_threshold": null,
   "artifact_path": "models/movement_model.pkl",
   "model_type": "xgboost_classifier",
-  "trained_at": "2026-05-06T11:50:42.032715+00:00"
+  "trained_at": "2026-05-06T12:08:24.348304+00:00"
 }

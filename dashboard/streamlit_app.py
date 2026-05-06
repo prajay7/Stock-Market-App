@@ -320,6 +320,10 @@ def render_app() -> None:
                 "symbols": symbols,
                 "train_result": None,
                 "prediction_result": None,
+                # per-symbol progress and aggregated predictions
+                "per_symbol": {},
+                "aggregated_predictions": [],
+                "current_index": 0,
                 "error": None,
             }
 
@@ -329,37 +333,58 @@ def render_app() -> None:
                     entry = GLOBAL_TRAIN_PRED_RUNS[run_id]
                     entry["status"] = "running"
                     entry["started_at"] = datetime.utcnow().isoformat()
-                    entry["message"] = "Training"
+                    entry["message"] = "Training symbols"
 
-                # Run training (may take a long time)
-                train_res = run_model_train_pipeline(
-                    symbols=symbols,
-                    symbols_csv=None,
-                    symbol_column=None,
-                    market="india",
-                    series_filter=None,
-                    max_symbols=None,
-                    horizon_days=horizon,
-                    task_type=task_type,
-                    ingest_first=ingest_first_flag,
-                    lookback_days=lookback,
-                    interval=interval_val,
-                )
+                # Process symbols one-by-one so UI can preview completed ones
+                total = len(symbols)
+                for idx, sym in enumerate(symbols, start=1):
+                    with GLOBAL_TRAIN_PRED_LOCK:
+                        GLOBAL_TRAIN_PRED_RUNS[run_id]["current_index"] = idx
+                        GLOBAL_TRAIN_PRED_RUNS[run_id]["message"] = f"Processing {idx}/{total}: {sym}"
+
+                    try:
+                        # Train for single symbol (limits training to that symbol)
+                        per_train = run_model_train_pipeline(
+                            symbols=[sym],
+                            symbols_csv=None,
+                            symbol_column=None,
+                            market="india",
+                            series_filter=None,
+                            max_symbols=1,
+                            horizon_days=horizon,
+                            task_type=task_type,
+                            ingest_first=ingest_first_flag,
+                            lookback_days=lookback,
+                            interval=interval_val,
+                        )
+
+                        with GLOBAL_TRAIN_PRED_LOCK:
+                            GLOBAL_TRAIN_PRED_RUNS[run_id]["per_symbol"][sym] = {"train_result": per_train, "status": "trained"}
+
+                        # Predict for this symbol and append to aggregated list
+                        per_pred = prediction_service.predict(
+                            symbols=[sym],
+                            model_name=model_name,
+                            horizon_days=horizon,
+                            include_live_quote=include_live,
+                        )
+
+                        preds = per_pred.get("predictions") or []
+                        with GLOBAL_TRAIN_PRED_LOCK:
+                            GLOBAL_TRAIN_PRED_RUNS[run_id]["per_symbol"][sym]["prediction_result"] = per_pred
+                            GLOBAL_TRAIN_PRED_RUNS[run_id]["per_symbol"][sym]["status"] = "predicted"
+                            # append rows with a run marker
+                            for r in preds:
+                                r["_run_id"] = run_id
+                            GLOBAL_TRAIN_PRED_RUNS[run_id]["aggregated_predictions"].extend(preds)
+
+                    except Exception as inner_exc:
+                        with GLOBAL_TRAIN_PRED_LOCK:
+                            GLOBAL_TRAIN_PRED_RUNS[run_id]["per_symbol"][sym] = {"status": "failed", "error": str(inner_exc)}
 
                 with GLOBAL_TRAIN_PRED_LOCK:
-                    GLOBAL_TRAIN_PRED_RUNS[run_id]["train_result"] = train_res
-                    GLOBAL_TRAIN_PRED_RUNS[run_id]["message"] = "Predicting"
-
-                # Run prediction
-                pred_res = prediction_service.predict(
-                    symbols=symbols,
-                    model_name=model_name,
-                    horizon_days=horizon,
-                    include_live_quote=include_live,
-                )
-
-                with GLOBAL_TRAIN_PRED_LOCK:
-                    GLOBAL_TRAIN_PRED_RUNS[run_id]["prediction_result"] = pred_res
+                    GLOBAL_TRAIN_PRED_RUNS[run_id]["train_result"] = {"task_type": task_type, "symbols_processed": total}
+                    GLOBAL_TRAIN_PRED_RUNS[run_id]["prediction_result"] = {"symbols_processed": total, "rows": len(GLOBAL_TRAIN_PRED_RUNS[run_id]["aggregated_predictions"])}
                     GLOBAL_TRAIN_PRED_RUNS[run_id]["status"] = "completed"
                     GLOBAL_TRAIN_PRED_RUNS[run_id]["message"] = "Completed"
                     GLOBAL_TRAIN_PRED_RUNS[run_id]["finished_at"] = datetime.utcnow().isoformat()
@@ -419,17 +444,31 @@ def render_app() -> None:
     if active and active in runs:
         info = runs[active]
         st.markdown(f"**Active run**: {active} — Status: {info.get('status')} | Message: {info.get('message')}")
-        if info.get("train_result"):
-            st.markdown("**Train result (summary)**")
-            tr = info.get("train_result")
-            st.json({"task_type": tr.get("task_type"), "version": tr.get("version"), "best": tr.get("best")})
-        if info.get("prediction_result"):
-            st.markdown("**Prediction preview (top rows)**")
+        # progress
+        cur = int(info.get("current_index") or 0)
+        total = len(info.get("symbols") or [])
+        if total:
+            st.progress(min(cur / total, 1.0))
+            st.caption(f"Processed {cur}/{total} symbols")
+
+        # per-symbol status table
+        per = info.get("per_symbol") or {}
+        if per:
             import pandas as pd
 
-            rows = info.get("prediction_result", {}).get("predictions") or []
-            if rows:
-                st.dataframe(pd.DataFrame(rows).head(10), use_container_width=True, height=280)
+            rows = []
+            for s, v in per.items():
+                rows.append({"symbol": s, "status": v.get("status"), "error": v.get("error")})
+            st.markdown("**Per-symbol progress**")
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, height=180)
+
+        # aggregated prediction preview
+        ag = info.get("aggregated_predictions") or []
+        if ag:
+            import pandas as pd
+
+            st.markdown("**Aggregated prediction preview (top rows)**")
+            st.dataframe(pd.DataFrame(ag).head(10), use_container_width=True, height=280)
     elif runs:
         # show last 3 runs
         for rid, entry in list(runs.items())[-3:]:
