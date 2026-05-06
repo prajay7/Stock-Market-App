@@ -1,0 +1,78 @@
+{
+  "NTPC": {
+    "ticker": "NTPC.NS",
+    "aliases": ["National Thermal Power Corporation"],
+    "sector": "Power",
+    "relations": [
+      {
+        "company": "Power Grid",
+        "ticker": "POWERGRID.NS",
+        "relation": "transmission",
+        "strength": 0.70
+      },
+      {
+        "company": "BHEL",
+        "ticker": "BHEL.NS",
+        "relation": "equipment_supplier",
+        "strength": 0.60
+      }
+    ]
+  },
+  "Reliance Industries": {
+    "ticker": "RELIANCE.NS",
+    "aliases": ["Reliance", "RIL"],
+    "sector": "Conglomerate",
+    "relations": [
+      {
+        "company": "Jio Financial Services",
+        "ticker": "JIOFIN.NS",
+        "relation": "ecosystem",
+        "strength": 0.65
+      },
+      {
+        "company": "Tata Chemicals",
+        "ticker": "TATACHEM.NS",
+        "relation": "industry_peer",
+        "strength": 0.25
+      }
+    ]
+  },
+  "Adani Power": {
+    "ticker": "ADANIPOWER.NS",
+    "aliases": ["Adani Power"],
+    "sector": "Power",
+    "relations": [
+      {
+        "company": "Coal India",
+        "ticker": "COALINDIA.NS",
+        "relation": "fuel_supplier",
+        "strength": 0.55
+      },
+      {
+        "company": "BHEL",
+        "ticker": "BHEL.NS",
+        "relation": "equipment_supplier",
+        "strength": 0.50
+      }
+    ]
+  },
+  "Tata Motors": {
+    "ticker": "TATAMOTORS.NS",
+    "aliases": ["Tata Motors"],
+    "sector": "Automobile",
+    "relations": [
+      {
+        "company": "Sona BLW Precision",
+        "ticker": "SONACOMS.NS",
+        "relation": "auto_components",
+        "strength": 0.60
+      },
+      {
+        "company": "Exide Industries",
+        "ticker": "EXIDEIND.NS",
+        "relation": "battery_supplier",
+        "strength": 0.55
+      }
+    ]
+  }
+}

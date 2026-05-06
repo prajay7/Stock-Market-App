@@ -1,0 +1,14 @@
+[
+  {
+    "label": "Google News - Markets",
+    "url": "https://news.google.com/rss/search?q=stock+market+news+when:1d&hl=en-IN&gl=IN&ceid=IN:en"
+  },
+  {
+    "label": "Google News - Indian Stocks",
+    "url": "https://news.google.com/rss/search?q=Indian+stocks+market+news+when:1d&hl=en-IN&gl=IN&ceid=IN:en"
+  },
+  {
+    "label": "Google News - Business",
+    "url": "https://news.google.com/rss/search?q=business+news+when:1d&hl=en-IN&gl=IN&ceid=IN:en"
+  }
+]

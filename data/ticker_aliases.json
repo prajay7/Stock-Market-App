@@ -1,0 +1,29 @@
+{
+  "companies": [
+    {
+      "company": "National Thermal Power Corporation",
+      "ticker": "NTPC.NS",
+      "aliases": ["NTPC", "NTPC Ltd"]
+    },
+    {
+      "company": "Power Grid Corporation of India",
+      "ticker": "POWERGRID.NS",
+      "aliases": ["Power Grid", "POWERGRID", "PGCIL"]
+    },
+    {
+      "company": "Reliance Industries",
+      "ticker": "RELIANCE.NS",
+      "aliases": ["Reliance", "RIL", "Reliance Industries Ltd"]
+    },
+    {
+      "company": "Bharat Heavy Electricals",
+      "ticker": "BHEL.NS",
+      "aliases": ["BHEL", "BHEL Ltd"]
+    },
+    {
+      "company": "Tata Motors",
+      "ticker": "TATAMOTORS.NS",
+      "aliases": ["Tata Motors Ltd", "TATAMOTORS"]
+    }
+  ]
+}

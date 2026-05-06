@@ -1,0 +1,68 @@
+# macOS
+.DS_Store
+
+# Python cache and tooling
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.venv_py314_backup/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Editors
+.vscode/
+.idea/
+
+# Local databases and logs
+*.db
+*.sqlite3
+*.log
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Generated project artifacts
+data/raw/
+data/processed/
+data/models/
+data/outputs/
+
+# Local packaged exports
+stock_app_code_with_env.zip
+
+# Additional common ignores
+# Jupyter
+.ipynb_checkpoints/
+
+# Packaging/build artifacts
+dist/
+build/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# Editor/project caches
+.cache/
+.ropeproject/
+
+# Python virtualenv markers
+.python-version
+
+# Temporary files
+*.tmp
+*.swp

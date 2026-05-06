@@ -1,0 +1,8 @@
+[server]
+headless = true
+port = 8501
+runOnSave = true
+fileWatcherType = "poll"
+
+[runner]
+fastReruns = true

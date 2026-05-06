@@ -1,0 +1,22 @@
+{
+  "NTPC": {
+    "ticker": "NTPC.NS",
+    "aliases": ["NTPC Ltd", "NTPC Limited", "National Thermal Power Corporation"]
+  },
+  "Power Grid": {
+    "ticker": "POWERGRID.NS",
+    "aliases": ["Power Grid Corp", "Power Grid Corporation", "Powergrid", "PGCIL"]
+  },
+  "BHEL": {
+    "ticker": "BHEL.NS",
+    "aliases": ["Bharat Heavy Electricals", "BHEL Ltd"]
+  },
+  "Tata Motors": {
+    "ticker": "TATAMOTORS.NS",
+    "aliases": ["Tata Motors Ltd", "TATAMOTORS"]
+  },
+  "Exide Industries": {
+    "ticker": "EXIDEIND.NS",
+    "aliases": ["Exide", "Exide Ind"]
+  }
+}
