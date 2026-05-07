@@ -83,12 +83,34 @@ def run_model_train_pipeline(
             lookback_days=effective_lookback,
         )
 
-    training_result = train_models(
-        symbols=resolved_symbols,
-        horizon_days=int(horizon_days),
-        refresh_prices=refresh_prices,
-        task_type=task_type,
-    )
+    skip_reason: str | None = None
+    try:
+        training_result = train_models(
+            symbols=resolved_symbols,
+            horizon_days=int(horizon_days),
+            refresh_prices=refresh_prices,
+            task_type=task_type,
+        )
+    except ValueError as exc:
+        error_message = str(exc)
+        if (
+            "Not enough rows for time-series validation" in error_message
+            or "No price data found. Run historical ingestion first." in error_message
+        ):
+            skip_reason = error_message
+            training_result = {
+                "status": "skipped",
+                "reason": error_message,
+                "version": run_started_at.strftime("%Y%m%d%H%M%S"),
+                "task_type": task_type,
+                "horizon_days": int(horizon_days),
+                "symbols": resolved_symbols,
+                "rows_ingested": int(sum(int(v or 0) for v in (ingest_summary or {}).values())),
+                "models": {},
+                "best": {},
+            }
+        else:
+            raise
 
     run_completed_at = datetime.now(timezone.utc)
     run_version = str(training_result.get("version") or run_completed_at.strftime("%Y%m%d%H%M%S"))
@@ -105,6 +127,8 @@ def run_model_train_pipeline(
         "artifact_path": str(settings.model_dir),
         "model_type": (training_result.get("best") or {}).get("best_model_name"),
         "payload": training_result,
+        "status": "skipped" if skip_reason else "completed",
+        "skip_reason": skip_reason,
     }
     SQLiteDataStore(settings.db_path).write_training_run(run_payload)
 
@@ -119,6 +143,8 @@ def run_model_train_pipeline(
         "horizon_days": int(horizon_days),
         "ingest_first": bool(ingest_first),
         "ingest_summary": ingest_summary,
+        "status": "skipped" if skip_reason else "completed",
+        "skip_reason": skip_reason,
         "result": training_result,
         "summary_path": str(summary_path),
     }
