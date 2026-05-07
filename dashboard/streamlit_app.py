@@ -14,9 +14,13 @@ import time
 GLOBAL_TRAIN_PRED_RUNS: dict = {}
 GLOBAL_TRAIN_PRED_LOCK = threading.Lock()
 
+from app.core.config import get_settings
+from app.services.data_service import data_service
+from app.services.news_service import news_service
 from app.services.prediction_service import prediction_service
 from dashboard.dataset_creator import create_dataset
 from dashboard.pipeline import run_full_pipeline
+from src.data.db import SQLiteDataStore
 from src.training.pipeline import run_model_train_pipeline
 from src.utils.symbols import load_symbols_from_csv
 
@@ -38,6 +42,33 @@ def _load_all_symbols_from_csv(csv_path: str, symbol_column: str, market: str, s
         )
     except Exception:
         return []
+
+
+def _filter_symbol_options(options: list[str], query: str, limit: int = 600) -> list[str]:
+    all_options = [str(item).strip().upper() for item in options if str(item).strip()]
+    if not all_options:
+        return []
+    q = str(query or "").strip().upper()
+    if not q:
+        return all_options[: int(limit)]
+
+    starts_with = [sym for sym in all_options if sym.startswith(q)]
+    contains = [sym for sym in all_options if q in sym and not sym.startswith(q)]
+    merged = starts_with + contains
+    return merged[: int(limit)]
+
+
+def _latest_candle_snapshot(symbols: list[str], interval: str) -> list[dict[str, str]]:
+    settings = get_settings()
+    store = SQLiteDataStore(settings.db_path)
+    rows: list[dict[str, str]] = []
+    for sym in symbols:
+        symbol = str(sym).strip().upper()
+        if not symbol:
+            continue
+        latest = store.latest_candle_time(symbol=symbol, interval=interval)
+        rows.append({"symbol": symbol, "latest_candle_time": str(latest or "")})
+    return rows
 
 
 def _resolve_prediction_symbols(
@@ -133,6 +164,218 @@ def render_app() -> None:
                 st.json(hist)
             st.write("Pipeline logs:")
             st.code("\n".join(str(line) for line in logs), language="text")
+
+    st.divider()
+    st.subheader("Smart Stock Pipeline")
+    st.caption("Search and multi-select stocks, scrape broad news sentiment, refresh latest historical data, train, and predict in one run.")
+
+    settings = get_settings()
+
+    smart_left, smart_right = st.columns(2)
+    with smart_left:
+        smart_symbols_csv = st.text_input(
+            "Symbols CSV (smart workflow)",
+            value="sec_list.csv",
+            key="smart_symbols_csv",
+        ).strip()
+        smart_symbol_column = st.text_input("Symbol column", value="Symbol", key="smart_symbol_column").strip()
+        smart_market = st.selectbox("Market", options=["us", "india"], index=1, key="smart_market")
+        smart_series_filter = st.text_input("Series filter (optional)", value="EQ", key="smart_series_filter").strip()
+        smart_search_text = st.text_input(
+            "Search symbol",
+            value="",
+            key="smart_symbol_search",
+            placeholder="Type ticker/company symbol text to narrow options",
+        ).strip()
+
+        smart_all_options = _load_all_symbols_from_csv(
+            csv_path=smart_symbols_csv,
+            symbol_column=smart_symbol_column or "Symbol",
+            market=smart_market,
+            series_filter=smart_series_filter or None,
+        )
+        if not smart_all_options:
+            smart_all_options = [str(sym).strip().upper() for sym in settings.default_symbols if str(sym).strip()]
+
+        if "smart_selected_symbols" not in st.session_state:
+            st.session_state["smart_selected_symbols"] = smart_all_options[: min(10, len(smart_all_options))]
+        else:
+            st.session_state["smart_selected_symbols"] = [
+                sym for sym in st.session_state["smart_selected_symbols"] if sym in smart_all_options
+            ]
+
+        smart_filtered_options = _filter_symbol_options(smart_all_options, smart_search_text, limit=600)
+        smart_merged_options = sorted(set(smart_filtered_options + st.session_state.get("smart_selected_symbols", [])))
+
+        st.caption(f"Matches: {len(smart_filtered_options)} | Total symbols loaded: {len(smart_all_options)}")
+        action_col1, action_col2 = st.columns(2)
+        if action_col1.button("Select all matches", key="smart_select_all_matches", use_container_width=True):
+            st.session_state["smart_selected_symbols"] = smart_filtered_options
+            st.rerun()
+        if action_col2.button("Clear selected", key="smart_clear_selected", use_container_width=True):
+            st.session_state["smart_selected_symbols"] = []
+            st.rerun()
+
+        smart_selected_symbols = st.multiselect(
+            "Select stock(s)",
+            options=smart_merged_options,
+            key="smart_selected_symbols",
+            help="This dropdown supports search. Use the search box above to quickly narrow a very large universe.",
+        )
+        st.caption(f"Selected stocks: {len(smart_selected_symbols)}")
+
+    with smart_right:
+        smart_news_limit = st.number_input(
+            "News items per symbol",
+            min_value=3,
+            max_value=300,
+            value=int(settings.max_news_items_per_symbol),
+            step=5,
+            key="smart_news_limit",
+        )
+        smart_interval = st.text_input("Historical interval", value=str(settings.historical_interval), key="smart_interval").strip()
+        smart_lookback_days = st.number_input(
+            "Historical lookback days",
+            min_value=30,
+            max_value=7300,
+            value=int(settings.historical_lookback_days),
+            step=30,
+            key="smart_lookback_days",
+        )
+        smart_task_type = st.selectbox(
+            "Training task",
+            options=["classification", "regression_return", "regression_close", "movement"],
+            index=0,
+            key="smart_task_type",
+        )
+        smart_train_horizon = st.number_input(
+            "Training horizon (days)",
+            min_value=1,
+            max_value=30,
+            value=1,
+            step=1,
+            key="smart_train_horizon",
+        )
+        smart_pred_model = st.selectbox(
+            "Prediction model",
+            options=["xgboost_classifier", "movement_model", "openai_stock_llm"],
+            index=0,
+            key="smart_pred_model",
+        )
+        smart_pred_horizon = st.number_input(
+            "Prediction horizon (days)",
+            min_value=1,
+            max_value=30,
+            value=1,
+            step=1,
+            key="smart_pred_horizon",
+        )
+        smart_include_live_quote = st.checkbox("Include live quote in prediction", value=True, key="smart_include_live_quote")
+
+    if st.button("Run Smart Pipeline (News -> Historical -> Train -> Predict)", type="primary", use_container_width=True):
+        chosen_symbols = [str(sym).strip().upper() for sym in smart_selected_symbols if str(sym).strip()]
+        if not chosen_symbols:
+            st.error("Please select at least one symbol.")
+            return
+
+        if len(chosen_symbols) > 300:
+            st.warning("Large batch selected. This may take a long time and can hit provider limits.")
+
+        smart_effective_task = smart_task_type
+        if smart_pred_model == "movement_model" and smart_task_type != "movement":
+            smart_effective_task = "movement"
+            st.info("Task auto-switched to 'movement' so training matches the selected prediction model.")
+
+        status_box = st.empty()
+        logs_box = st.empty()
+        smart_logs: list[str] = []
+
+        def _smart_log(message: str) -> None:
+            smart_logs.append(str(message))
+            status_box.info(str(message))
+            logs_box.code("\n".join(smart_logs[-40:]), language="text")
+
+        with st.spinner("Running smart stock pipeline..."):
+            _smart_log("Step 1/4: Scraping news for selected symbols")
+            news_summary = news_service.ingest_news(chosen_symbols, int(smart_news_limit))
+
+            _smart_log("Step 2/4: Refreshing latest historical price data")
+            historical_summary = data_service.ingest_historical(
+                symbols=chosen_symbols,
+                interval=smart_interval or str(settings.historical_interval),
+                lookback_days=int(smart_lookback_days),
+            )
+            latest_snapshot = _latest_candle_snapshot(
+                symbols=chosen_symbols,
+                interval=smart_interval or str(settings.historical_interval),
+            )
+
+            _smart_log("Step 3/4: Training model with sentiment + technical features")
+            train_result = run_model_train_pipeline(
+                symbols=chosen_symbols,
+                symbols_csv=None,
+                symbol_column=None,
+                market=smart_market,
+                series_filter=smart_series_filter or None,
+                max_symbols=None,
+                horizon_days=int(smart_train_horizon),
+                task_type=smart_effective_task,
+                ingest_first=False,
+                lookback_days=int(smart_lookback_days),
+                interval=smart_interval or None,
+            )
+
+            _smart_log("Step 4/4: Generating price predictions")
+            prediction_result = prediction_service.predict(
+                symbols=chosen_symbols,
+                model_name=smart_pred_model,
+                horizon_days=int(smart_pred_horizon),
+                include_live_quote=bool(smart_include_live_quote),
+                use_trending=False,
+            )
+
+        predictions = prediction_result.get("predictions") or []
+        status_box.success("Smart pipeline completed successfully.")
+
+        if predictions:
+            import pandas as pd
+
+            pred_df = pd.DataFrame(predictions)
+            preferred_cols = [
+                "symbol",
+                "current_price",
+                "predicted_price",
+                "target_price",
+                "stop_loss_price",
+                "prob_up",
+                "predicted_return",
+                "confidence",
+                "decision",
+                "news_decision",
+                "news_signal_score",
+            ]
+            show_cols = [c for c in preferred_cols if c in pred_df.columns]
+            st.dataframe(pred_df[show_cols] if show_cols else pred_df, use_container_width=True, height=380)
+
+        st.json(
+            {
+                "symbols_count": len(chosen_symbols),
+                "symbols": chosen_symbols,
+                "news_ingest_summary": news_summary,
+                "historical_ingest_summary": historical_summary,
+                "latest_historical_snapshot": latest_snapshot,
+                "trained": {
+                    "task_type": str(train_result.get("task_type") or smart_effective_task),
+                    "version": str(train_result.get("version") or ""),
+                    "best": (train_result.get("result") or {}).get("best") or {},
+                },
+                "predicted": {
+                    "model_name": smart_pred_model,
+                    "rows": len(predictions),
+                    "symbols_used": prediction_result.get("symbols_used") or [],
+                },
+            }
+        )
 
     st.divider()
     st.subheader("Model Train Pipeline")
