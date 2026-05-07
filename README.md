@@ -67,6 +67,32 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 streamlit run dashboard/streamlit_app.py
 ```
 
+## Continuous Training (GitHub Actions Cron)
+This repo includes a scheduled workflow at `.github/workflows/continuous-model-training.yml`.
+
+- Schedule: every 6 hours (UTC)
+- Manual trigger: **Actions -> Continuous Model Training -> Run workflow**
+- Behavior: refresh historical data and run `scripts/train_pipeline.py --ingest-first`, then upload model/output artifacts
+
+This repo also includes fast refresh + prediction at `.github/workflows/market-refresh-predict.yml`.
+
+- Schedule: every 10 minutes (UTC)
+- Manual trigger: **Actions -> Market Refresh And Predict -> Run workflow**
+- Behavior: refresh news + historical data, run prediction, and upload latest prediction artifacts
+
+Recommended repository variables (Settings -> Secrets and variables -> Actions -> Variables):
+- `DEFAULT_SYMBOLS`
+- `DATA_PROVIDER`
+- `NEWS_PROVIDER`
+- `HISTORICAL_INTERVAL`
+- `HISTORICAL_LOOKBACK_DAYS`
+- `MAX_NEWS_ITEMS_PER_SYMBOL` (optional)
+
+Optional repository secrets:
+- `ALPHA_VANTAGE_API_KEY`
+- `POLYGON_API_KEY`
+- `OPENAI_API_KEY`
+
 ## End-to-End Commands
 ### Ingest historical data
 ```bash

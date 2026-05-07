@@ -302,6 +302,11 @@ def render_app() -> None:
             status_box.info(str(message))
             logs_box.code("\n".join(smart_logs[-40:]), language="text")
 
+        train_result: dict | None = None
+        prediction_result: dict | None = None
+        training_error: str | None = None
+        prediction_error: str | None = None
+
         with st.spinner("Running smart stock pipeline..."):
             _smart_log("Step 1/4: Scraping news for selected symbols")
             news_summary = news_service.ingest_news(chosen_symbols, int(smart_news_limit))
@@ -318,31 +323,54 @@ def render_app() -> None:
             )
 
             _smart_log("Step 3/4: Training model with sentiment + technical features")
-            train_result = run_model_train_pipeline(
-                symbols=chosen_symbols,
-                symbols_csv=None,
-                symbol_column=None,
-                market=smart_market,
-                series_filter=smart_series_filter or None,
-                max_symbols=None,
-                horizon_days=int(smart_train_horizon),
-                task_type=smart_effective_task,
-                ingest_first=False,
-                lookback_days=int(smart_lookback_days),
-                interval=smart_interval or None,
-            )
+            try:
+                train_result = run_model_train_pipeline(
+                    symbols=chosen_symbols,
+                    symbols_csv=None,
+                    symbol_column=None,
+                    market=smart_market,
+                    series_filter=smart_series_filter or None,
+                    max_symbols=None,
+                    horizon_days=int(smart_train_horizon),
+                    task_type=smart_effective_task,
+                    ingest_first=False,
+                    lookback_days=int(smart_lookback_days),
+                    interval=smart_interval or None,
+                )
+            except Exception as exc:
+                training_error = str(exc)
+                _smart_log(f"Step 3/4: Training warning - {training_error}")
 
             _smart_log("Step 4/4: Generating price predictions")
-            prediction_result = prediction_service.predict(
-                symbols=chosen_symbols,
-                model_name=smart_pred_model,
-                horizon_days=int(smart_pred_horizon),
-                include_live_quote=bool(smart_include_live_quote),
-                use_trending=False,
-            )
+            try:
+                prediction_result = prediction_service.predict(
+                    symbols=chosen_symbols,
+                    model_name=smart_pred_model,
+                    horizon_days=int(smart_pred_horizon),
+                    include_live_quote=bool(smart_include_live_quote),
+                    use_trending=False,
+                )
+            except Exception as exc:
+                prediction_error = str(exc)
+                _smart_log(f"Step 4/4: Prediction failed - {prediction_error}")
 
-        predictions = prediction_result.get("predictions") or []
-        status_box.success("Smart pipeline completed successfully.")
+        predictions = (prediction_result or {}).get("predictions") or []
+        if prediction_error:
+            status_box.error("Smart pipeline finished with prediction error.")
+        elif training_error:
+            status_box.warning("Smart pipeline finished with training warning. Predictions used available model artifacts.")
+        else:
+            status_box.success("Smart pipeline completed successfully.")
+
+        if training_error:
+            st.warning(f"Training step warning: {training_error}")
+            if "Not enough rows for time-series validation" in training_error:
+                st.info(
+                    "Not enough historical rows for time-series validation. "
+                    "Try increasing lookback days, selecting more liquid symbols, or selecting multiple stocks."
+                )
+        if prediction_error:
+            st.error(f"Prediction step failed: {prediction_error}")
 
         if predictions:
             import pandas as pd
@@ -372,14 +400,18 @@ def render_app() -> None:
                 "historical_ingest_summary": historical_summary,
                 "latest_historical_snapshot": latest_snapshot,
                 "trained": {
-                    "task_type": str(train_result.get("task_type") or smart_effective_task),
-                    "version": str(train_result.get("version") or ""),
-                    "best": (train_result.get("result") or {}).get("best") or {},
+                    "status": "ok" if train_result else ("warning" if training_error else "unknown"),
+                    "task_type": str((train_result or {}).get("task_type") or smart_effective_task),
+                    "version": str((train_result or {}).get("version") or ""),
+                    "best": ((train_result or {}).get("result") or {}).get("best") or {},
+                    "error": training_error,
                 },
                 "predicted": {
+                    "status": "ok" if not prediction_error else "failed",
                     "model_name": smart_pred_model,
                     "rows": len(predictions),
-                    "symbols_used": prediction_result.get("symbols_used") or [],
+                    "symbols_used": (prediction_result or {}).get("symbols_used") or [],
+                    "error": prediction_error,
                 },
             }
         )

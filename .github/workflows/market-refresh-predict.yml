@@ -1,0 +1,201 @@
+name: Market Refresh And Predict
+
+on:
+  schedule:
+    # Every 10 minutes (UTC)
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Comma-separated symbols (blank uses DEFAULT_SYMBOLS)"
+        required: false
+        default: ""
+      model_name:
+        description: "Prediction model (xgboost_classifier | movement_model | openai_stock_llm)"
+        required: false
+        default: "xgboost_classifier"
+      horizon_days:
+        description: "Prediction horizon days"
+        required: false
+        default: "1"
+      interval:
+        description: "Historical interval (example: 1d)"
+        required: false
+        default: "1d"
+      lookback_days:
+        description: "Historical lookback days"
+        required: false
+        default: "3650"
+      include_live_quote:
+        description: "Include live quote in prediction (true/false)"
+        required: false
+        default: "false"
+      news_limit_per_symbol:
+        description: "Max news rows per symbol"
+        required: false
+        default: "100"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: market-refresh-predict
+  cancel-in-progress: true
+
+jobs:
+  refresh-and-predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: .
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      # Repo variables
+      DEFAULT_SYMBOLS: ${{ vars.DEFAULT_SYMBOLS }}
+      DATA_PROVIDER: ${{ vars.DATA_PROVIDER }}
+      NEWS_PROVIDER: ${{ vars.NEWS_PROVIDER }}
+      HISTORICAL_INTERVAL: ${{ vars.HISTORICAL_INTERVAL }}
+      HISTORICAL_LOOKBACK_DAYS: ${{ vars.HISTORICAL_LOOKBACK_DAYS }}
+      MAX_NEWS_ITEMS_PER_SYMBOL: ${{ vars.MAX_NEWS_ITEMS_PER_SYMBOL }}
+      # Optional secrets
+      ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # Manual inputs
+      INPUT_SYMBOLS: ${{ github.event.inputs.symbols }}
+      INPUT_MODEL_NAME: ${{ github.event.inputs.model_name }}
+      INPUT_HORIZON_DAYS: ${{ github.event.inputs.horizon_days }}
+      INPUT_INTERVAL: ${{ github.event.inputs.interval }}
+      INPUT_LOOKBACK_DAYS: ${{ github.event.inputs.lookback_days }}
+      INPUT_INCLUDE_LIVE_QUOTE: ${{ github.event.inputs.include_live_quote }}
+      INPUT_NEWS_LIMIT_PER_SYMBOL: ${{ github.event.inputs.news_limit_per_symbol }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Resolve run parameters
+        id: params
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SYMBOLS_CSV="${INPUT_SYMBOLS:-${DEFAULT_SYMBOLS:-RELIANCE,TCS,INFY,HDFCBANK,ICICIBANK,SBIN}}"
+          MODEL_NAME="${INPUT_MODEL_NAME:-xgboost_classifier}"
+          HORIZON_DAYS="${INPUT_HORIZON_DAYS:-1}"
+          INTERVAL="${INPUT_INTERVAL:-${HISTORICAL_INTERVAL:-1d}}"
+          LOOKBACK_DAYS="${INPUT_LOOKBACK_DAYS:-${HISTORICAL_LOOKBACK_DAYS:-3650}}"
+          INCLUDE_LIVE_QUOTE="${INPUT_INCLUDE_LIVE_QUOTE:-false}"
+          NEWS_LIMIT="${INPUT_NEWS_LIMIT_PER_SYMBOL:-${MAX_NEWS_ITEMS_PER_SYMBOL:-100}}"
+
+          NORMALIZED="$(echo "${SYMBOLS_CSV}" | tr '\n' ',' | tr ' ' ',' | sed 's/,,*/,/g; s/^,//; s/,$//')"
+          if [ -z "${NORMALIZED}" ]; then
+            NORMALIZED="RELIANCE,TCS,INFY,HDFCBANK,ICICIBANK,SBIN"
+          fi
+
+          echo "symbols_csv=${NORMALIZED}" >> "${GITHUB_OUTPUT}"
+          echo "model_name=${MODEL_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "horizon_days=${HORIZON_DAYS}" >> "${GITHUB_OUTPUT}"
+          echo "interval=${INTERVAL}" >> "${GITHUB_OUTPUT}"
+          echo "lookback_days=${LOOKBACK_DAYS}" >> "${GITHUB_OUTPUT}"
+          echo "include_live_quote=${INCLUDE_LIVE_QUOTE}" >> "${GITHUB_OUTPUT}"
+          echo "news_limit=${NEWS_LIMIT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Refresh market/news and predict
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SYMBOLS_CSV="${{ steps.params.outputs.symbols_csv }}"
+          export MODEL_NAME="${{ steps.params.outputs.model_name }}"
+          export HORIZON_DAYS="${{ steps.params.outputs.horizon_days }}"
+          export INTERVAL="${{ steps.params.outputs.interval }}"
+          export LOOKBACK_DAYS="${{ steps.params.outputs.lookback_days }}"
+          export INCLUDE_LIVE_QUOTE="${{ steps.params.outputs.include_live_quote }}"
+          export NEWS_LIMIT="${{ steps.params.outputs.news_limit }}"
+
+          python - <<'PY'
+          from __future__ import annotations
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          from app.core.config import get_settings
+          from app.services.data_service import data_service
+          from app.services.news_service import news_service
+          from app.services.prediction_service import prediction_service
+
+          settings = get_settings()
+          symbols = [part.strip().upper() for part in os.getenv("SYMBOLS_CSV", "").split(",") if part.strip()]
+          model_name = str(os.getenv("MODEL_NAME", "xgboost_classifier")).strip() or "xgboost_classifier"
+          horizon_days = int(os.getenv("HORIZON_DAYS", "1"))
+          interval = str(os.getenv("INTERVAL", settings.historical_interval)).strip() or str(settings.historical_interval)
+          lookback_days = int(os.getenv("LOOKBACK_DAYS", settings.historical_lookback_days))
+          include_live_quote = str(os.getenv("INCLUDE_LIVE_QUOTE", "false")).strip().lower() == "true"
+          news_limit = int(os.getenv("NEWS_LIMIT", settings.max_news_items_per_symbol))
+
+          if not symbols:
+              raise ValueError("No symbols resolved for refresh/predict workflow")
+
+          print(f"Resolved {len(symbols)} symbols")
+          print(f"Model: {model_name} | Horizon: {horizon_days} | Interval: {interval} | Lookback: {lookback_days}")
+
+          news_summary = news_service.ingest_news(symbols, news_limit)
+          historical_summary = data_service.ingest_historical(symbols, interval=interval, lookback_days=lookback_days)
+          prediction_result = prediction_service.predict(
+              symbols=symbols,
+              model_name=model_name,
+              horizon_days=horizon_days,
+              include_live_quote=include_live_quote,
+              use_trending=False,
+          )
+
+          outputs_dir = Path(settings.output_dir)
+          outputs_dir.mkdir(parents=True, exist_ok=True)
+          summary_path = outputs_dir / "market_refresh_predict_summary.json"
+          payload = {
+              "generated_at": datetime.now(timezone.utc).isoformat(),
+              "symbols_count": len(symbols),
+              "symbols": symbols,
+              "model_name": model_name,
+              "horizon_days": horizon_days,
+              "interval": interval,
+              "lookback_days": lookback_days,
+              "include_live_quote": include_live_quote,
+              "news_limit_per_symbol": news_limit,
+              "news_summary": news_summary,
+              "historical_summary": historical_summary,
+              "prediction_rows": len(prediction_result.get("predictions") or []),
+              "symbols_used": prediction_result.get("symbols_used") or [],
+          }
+          summary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+          print(f"Prediction rows: {payload['prediction_rows']}")
+          print(f"Summary file: {summary_path}")
+          PY
+
+      - name: Upload prediction artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: refresh-predict-artifacts-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            data/outputs/latest_predictions.parquet
+            data/outputs/latest_predictions.csv
+            data/outputs/latest_predictions.json
+            data/outputs/market_refresh_predict_summary.json
+            logs/*

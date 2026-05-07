@@ -1,0 +1,133 @@
+name: Continuous Model Training
+
+on:
+  schedule:
+    # Every 6 hours (UTC)
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Comma-separated symbols (blank uses DEFAULT_SYMBOLS)"
+        required: false
+        default: ""
+      task_type:
+        description: "classification | regression_return | regression_close | movement"
+        required: false
+        default: "classification"
+      horizon_days:
+        description: "Target horizon days"
+        required: false
+        default: "1"
+      lookback_days:
+        description: "Historical lookback days"
+        required: false
+        default: "3650"
+      interval:
+        description: "Price interval (example: 1d)"
+        required: false
+        default: "1d"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: continuous-model-training
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      PYTHONPATH: .
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      # Repo variables (Settings -> Secrets and variables -> Actions -> Variables)
+      DEFAULT_SYMBOLS: ${{ vars.DEFAULT_SYMBOLS }}
+      DATA_PROVIDER: ${{ vars.DATA_PROVIDER }}
+      NEWS_PROVIDER: ${{ vars.NEWS_PROVIDER }}
+      HISTORICAL_INTERVAL: ${{ vars.HISTORICAL_INTERVAL }}
+      HISTORICAL_LOOKBACK_DAYS: ${{ vars.HISTORICAL_LOOKBACK_DAYS }}
+      # Optional API secrets
+      ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      INPUT_SYMBOLS: ${{ github.event.inputs.symbols }}
+      INPUT_TASK_TYPE: ${{ github.event.inputs.task_type }}
+      INPUT_HORIZON_DAYS: ${{ github.event.inputs.horizon_days }}
+      INPUT_LOOKBACK_DAYS: ${{ github.event.inputs.lookback_days }}
+      INPUT_INTERVAL: ${{ github.event.inputs.interval }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Resolve run parameters
+        id: params
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SYMBOLS_CSV="${INPUT_SYMBOLS:-${DEFAULT_SYMBOLS:-RELIANCE,TCS,INFY,HDFCBANK,ICICIBANK,SBIN}}"
+          TASK_TYPE="${INPUT_TASK_TYPE:-classification}"
+          HORIZON_DAYS="${INPUT_HORIZON_DAYS:-1}"
+          LOOKBACK_DAYS="${INPUT_LOOKBACK_DAYS:-3650}"
+          INTERVAL="${INPUT_INTERVAL:-1d}"
+
+          # Normalize list: allow comma and/or spaces.
+          NORMALIZED="$(echo "${SYMBOLS_CSV}" | tr '\n' ',' | tr ' ' ',' | sed 's/,,*/,/g; s/^,//; s/,$//')"
+          if [ -z "${NORMALIZED}" ]; then
+            NORMALIZED="RELIANCE,TCS,INFY,HDFCBANK,ICICIBANK,SBIN"
+          fi
+
+          echo "symbols_csv=${NORMALIZED}" >> "${GITHUB_OUTPUT}"
+          echo "task_type=${TASK_TYPE}" >> "${GITHUB_OUTPUT}"
+          echo "horizon_days=${HORIZON_DAYS}" >> "${GITHUB_OUTPUT}"
+          echo "lookback_days=${LOOKBACK_DAYS}" >> "${GITHUB_OUTPUT}"
+          echo "interval=${INTERVAL}" >> "${GITHUB_OUTPUT}"
+
+      - name: Train models (ingest first)
+        shell: bash
+        run: |
+          set -euo pipefail
+          IFS=',' read -r -a SYMBOLS <<< "${{ steps.params.outputs.symbols_csv }}"
+
+          echo "Training symbols: ${SYMBOLS[*]}"
+          echo "Task type: ${{ steps.params.outputs.task_type }}"
+          echo "Horizon days: ${{ steps.params.outputs.horizon_days }}"
+          echo "Lookback days: ${{ steps.params.outputs.lookback_days }}"
+          echo "Interval: ${{ steps.params.outputs.interval }}"
+
+          python scripts/train_pipeline.py \
+            --symbols "${SYMBOLS[@]}" \
+            --task-type "${{ steps.params.outputs.task_type }}" \
+            --horizon-days "${{ steps.params.outputs.horizon_days }}" \
+            --ingest-first \
+            --lookback-days "${{ steps.params.outputs.lookback_days }}" \
+            --interval "${{ steps.params.outputs.interval }}"
+
+      - name: Upload training artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-artifacts-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            data/models/*.joblib
+            data/models/*.metadata.json
+            data/models/*.feature_importance.json
+            data/outputs/training_pipeline_*.json
+            logs/*
