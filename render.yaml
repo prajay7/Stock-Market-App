@@ -1,0 +1,28 @@
+services:
+  - type: web
+    runtime: docker
+    name: stock-market-app-api
+    plan: free
+    autoDeployTrigger: commit
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: DATA_PROVIDER
+        sync: false
+      - key: NEWS_PROVIDER
+        sync: false
+      - key: DEFAULT_SYMBOLS
+        sync: false
+      - key: HISTORICAL_INTERVAL
+        sync: false
+      - key: HISTORICAL_LOOKBACK_DAYS
+        sync: false
+      - key: ALPHA_VANTAGE_API_KEY
+        sync: false
+      - key: POLYGON_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false

@@ -67,6 +67,17 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 streamlit run dashboard/streamlit_app.py
 ```
 
+## Deploy FastAPI Live (GitHub)
+GitHub itself cannot host a running FastAPI backend, but this repo is ready for live deploy via Render from GitHub.
+
+1. Push code to GitHub (includes `render.yaml`).
+2. In Render, create a new Blueprint service from this repo.
+3. Set required environment variables (API keys, providers, symbols).
+4. Deploy and use health endpoint:
+```bash
+GET /health
+```
+
 ## Continuous Training (GitHub Actions Cron)
 This repo includes a scheduled workflow at `.github/workflows/continuous-model-training.yml`.
 
