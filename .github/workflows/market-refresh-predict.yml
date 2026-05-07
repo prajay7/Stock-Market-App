@@ -161,6 +161,10 @@ jobs:
               include_live_quote=include_live_quote,
               use_trending=False,
           )
+          effective_model_name = str(prediction_result.get("effective_model_name") or model_name)
+          fallback_reason = str(prediction_result.get("model_fallback_reason") or "").strip()
+          if fallback_reason:
+              print(f"Model fallback: {fallback_reason}")
 
           outputs_dir = Path(settings.output_dir)
           outputs_dir.mkdir(parents=True, exist_ok=True)
@@ -169,7 +173,9 @@ jobs:
               "generated_at": datetime.now(timezone.utc).isoformat(),
               "symbols_count": len(symbols),
               "symbols": symbols,
-              "model_name": model_name,
+              "model_name": effective_model_name,
+              "requested_model_name": str(model_name),
+              "model_fallback_reason": fallback_reason,
               "horizon_days": horizon_days,
               "interval": interval,
               "lookback_days": lookback_days,
