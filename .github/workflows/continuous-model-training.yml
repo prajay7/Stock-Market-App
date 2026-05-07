@@ -45,8 +45,8 @@ jobs:
       DEFAULT_SYMBOLS: ${{ vars.DEFAULT_SYMBOLS }}
       DATA_PROVIDER: ${{ vars.DATA_PROVIDER }}
       NEWS_PROVIDER: ${{ vars.NEWS_PROVIDER }}
-      HISTORICAL_INTERVAL: ${{ vars.HISTORICAL_INTERVAL }}
-      HISTORICAL_LOOKBACK_DAYS: ${{ vars.HISTORICAL_LOOKBACK_DAYS }}
+      HISTORICAL_INTERVAL: ${{ vars.HISTORICAL_INTERVAL || '1d' }}
+      HISTORICAL_LOOKBACK_DAYS: ${{ vars.HISTORICAL_LOOKBACK_DAYS || '3650' }}
       # Optional API secrets
       ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
       POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -83,8 +83,8 @@ jobs:
           SYMBOLS_CSV="${INPUT_SYMBOLS:-${DEFAULT_SYMBOLS:-RELIANCE,TCS,INFY,HDFCBANK,ICICIBANK,SBIN}}"
           TASK_TYPE="${INPUT_TASK_TYPE:-classification}"
           HORIZON_DAYS="${INPUT_HORIZON_DAYS:-1}"
-          LOOKBACK_DAYS="${INPUT_LOOKBACK_DAYS:-3650}"
-          INTERVAL="${INPUT_INTERVAL:-1d}"
+          LOOKBACK_DAYS="${INPUT_LOOKBACK_DAYS:-${HISTORICAL_LOOKBACK_DAYS:-3650}}"
+          INTERVAL="${INPUT_INTERVAL:-${HISTORICAL_INTERVAL:-1d}}"
 
           # Normalize list: allow comma and/or spaces.
           NORMALIZED="$(echo "${SYMBOLS_CSV}" | tr '\n' ',' | tr ' ' ',' | sed 's/,,*/,/g; s/^,//; s/,$//')"

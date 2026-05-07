@@ -19,6 +19,14 @@ AUTOMATION_UI_LOCK = threading.Lock()
 AUTOMATION_UI_RUNS: dict[str, dict] = {}
 AUTOMATION_UI_ACTIVE_RUN_ID: str | None = None
 RUN_HISTORY_PATH = Path("data/outputs/checkpoints/dashboard_automation_runs.json")
+AUTOMATION_MODEL_OPTIONS = [
+    "auto",
+    "xgboost_classifier",
+    "openai_stock_llm_fast",
+    "openai_stock_llm",
+    "openai_stock_llm_search",
+    "openai_stock_llm_cheap",
+]
 
 
 def _persist_runs() -> None:
@@ -381,14 +389,12 @@ def render_automation_monitor() -> None:
     st.subheader("Quick Switches")
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
+        configured_model = str(settings.automation_prediction_model or "auto").strip()
+        default_model = configured_model if configured_model in AUTOMATION_MODEL_OPTIONS else "auto"
         model_override = st.selectbox(
             "Prediction model",
-            options=["auto", "xgboost_classifier", "openai_stock_llm"],
-            index=["auto", "xgboost_classifier", "openai_stock_llm"].index(
-                str(settings.automation_prediction_model or "auto")
-                if str(settings.automation_prediction_model or "auto") in {"auto", "xgboost_classifier", "openai_stock_llm"}
-                else "auto"
-            ),
+            options=AUTOMATION_MODEL_OPTIONS,
+            index=AUTOMATION_MODEL_OPTIONS.index(default_model),
             key="automation_model_override",
         )
     with col2:

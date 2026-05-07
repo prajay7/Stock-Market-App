@@ -21,6 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 GLOBAL_TRAIN_PRED_RUNS: dict = {}
 GLOBAL_TRAIN_PRED_LOCK = threading.Lock()
 
+from app.core.constants import OPENAI_STOCK_MODEL_ALIASES_SET
 from app.core.config import get_settings
 from app.services.data_service import data_service
 from app.services.news_service import news_service
@@ -30,6 +31,13 @@ from dashboard.pipeline import run_full_pipeline
 from src.data.db import SQLiteDataStore
 from src.training.pipeline import run_model_train_pipeline
 from src.utils.symbols import load_symbols_from_csv
+
+OPENAI_PREDICTION_MODEL_OPTIONS = [
+    "openai_stock_llm_fast",
+    "openai_stock_llm",
+    "openai_stock_llm_search",
+    "openai_stock_llm_cheap",
+]
 
 
 def _parse_symbols(raw: str) -> list[str]:
@@ -76,6 +84,38 @@ def _latest_candle_snapshot(symbols: list[str], interval: str) -> list[dict[str,
         latest = store.latest_candle_time(symbol=symbol, interval=interval)
         rows.append({"symbol": symbol, "latest_candle_time": str(latest or "")})
     return rows
+
+
+def _prediction_model_available(model_name: str, settings) -> bool:
+    name = str(model_name or "").strip().lower()
+    if not name:
+        return False
+    if name in OPENAI_STOCK_MODEL_ALIASES_SET:
+        return bool(settings.openai_predict_enabled)
+    if name in {"movement", "movement_model"}:
+        return bool(settings.movement_model_path.exists())
+
+    latest_path = settings.model_dir / f"{name}_latest.joblib"
+    if latest_path.exists():
+        return True
+    return any(settings.model_dir.glob(f"{name}_*.joblib"))
+
+
+def _resolve_prediction_model_with_fallback(requested_model: str, settings) -> tuple[str | None, str | None]:
+    requested = str(requested_model or "").strip()
+    if _prediction_model_available(requested, settings):
+        return requested, None
+
+    candidates = ["movement_model", "xgboost_classifier", "openai_stock_llm_fast", "openai_stock_llm"]
+    seen: set[str] = {requested.lower()}
+    for candidate in candidates:
+        if candidate.lower() in seen:
+            continue
+        seen.add(candidate.lower())
+        if _prediction_model_available(candidate, settings):
+            return candidate, f"Requested model '{requested}' was unavailable; using '{candidate}' fallback."
+
+    return None, f"No prediction model artifacts available for '{requested}'."
 
 
 def _resolve_prediction_symbols(
@@ -265,7 +305,7 @@ def render_app() -> None:
         )
         smart_pred_model = st.selectbox(
             "Prediction model",
-            options=["xgboost_classifier", "movement_model", "openai_stock_llm"],
+            options=["xgboost_classifier", "movement_model"] + OPENAI_PREDICTION_MODEL_OPTIONS,
             index=0,
             key="smart_pred_model",
         )
@@ -306,6 +346,7 @@ def render_app() -> None:
         prediction_result: dict | None = None
         training_error: str | None = None
         prediction_error: str | None = None
+        effective_prediction_model = str(smart_pred_model)
 
         with st.spinner("Running smart stock pipeline..."):
             _smart_log("Step 1/4: Scraping news for selected symbols")
@@ -342,17 +383,25 @@ def render_app() -> None:
                 _smart_log(f"Step 3/4: Training warning - {training_error}")
 
             _smart_log("Step 4/4: Generating price predictions")
-            try:
-                prediction_result = prediction_service.predict(
-                    symbols=chosen_symbols,
-                    model_name=smart_pred_model,
-                    horizon_days=int(smart_pred_horizon),
-                    include_live_quote=bool(smart_include_live_quote),
-                    use_trending=False,
-                )
-            except Exception as exc:
-                prediction_error = str(exc)
+            resolved_model, fallback_reason = _resolve_prediction_model_with_fallback(smart_pred_model, settings)
+            if fallback_reason:
+                _smart_log(f"Step 4/4: {fallback_reason}")
+            if resolved_model is None:
+                prediction_error = fallback_reason or f"No artifacts found for model {smart_pred_model}"
                 _smart_log(f"Step 4/4: Prediction failed - {prediction_error}")
+            else:
+                effective_prediction_model = str(resolved_model)
+                try:
+                    prediction_result = prediction_service.predict(
+                        symbols=chosen_symbols,
+                        model_name=effective_prediction_model,
+                        horizon_days=int(smart_pred_horizon),
+                        include_live_quote=bool(smart_include_live_quote),
+                        use_trending=False,
+                    )
+                except Exception as exc:
+                    prediction_error = str(exc)
+                    _smart_log(f"Step 4/4: Prediction failed - {prediction_error}")
 
         predictions = (prediction_result or {}).get("predictions") or []
         if prediction_error:
@@ -408,7 +457,7 @@ def render_app() -> None:
                 },
                 "predicted": {
                     "status": "ok" if not prediction_error else "failed",
-                    "model_name": smart_pred_model,
+                    "model_name": effective_prediction_model,
                     "rows": len(predictions),
                     "symbols_used": (prediction_result or {}).get("symbols_used") or [],
                     "error": prediction_error,
@@ -523,7 +572,7 @@ def render_app() -> None:
     with pp_col2:
         pred_model_name = st.selectbox(
             "Prediction model",
-            options=["movement_model", "xgboost_classifier", "openai_stock_llm"],
+            options=["movement_model", "xgboost_classifier"] + OPENAI_PREDICTION_MODEL_OPTIONS,
             index=0,
         )
         pred_horizon_days = st.number_input("Prediction horizon days", min_value=1, max_value=10, value=1, step=1)

@@ -13,12 +13,22 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from app.core.constants import (
+    OPENAI_CHEAP_MODEL,
+    OPENAI_FAST_MODEL,
+    OPENAI_SEARCH_MODEL,
+    OPENAI_STOCK_MODEL_ALIASES_SET,
+)
 from app.core.config import get_settings
 from src.data.db import SQLiteDataStore
 from src.data.cache import symbol_price_path
 from src.data.historical_loader import HistoricalLoader
 from src.inference.rank import rank_predictions
 from src.training.dataset_builder import build_and_save_dataset
+
+FAST_MODEL = OPENAI_FAST_MODEL
+SEARCH_MODEL = OPENAI_SEARCH_MODEL
+CHEAP_MODEL = OPENAI_CHEAP_MODEL
 
 
 def _latest_model_path(model_dir: Path, model_name: str) -> Path:
@@ -277,7 +287,43 @@ def _llm_feature_snapshot(row: pd.Series) -> dict:
     return out
 
 
-def _predict_symbol_with_openai(row: pd.Series, settings, horizon_days: int) -> dict:
+def _openai_model_alias_map(settings) -> dict[str, str]:
+    default_model = str(
+        settings.openai_predict_model_name or settings.openai_fast_model_name or FAST_MODEL
+    ).strip()
+    fast_model = str(settings.openai_fast_model_name or FAST_MODEL).strip()
+    search_model = str(settings.openai_search_model_name or SEARCH_MODEL).strip()
+    cheap_model = str(settings.openai_cheap_model_name or CHEAP_MODEL).strip()
+    return {
+        "openai_stock_llm": default_model,
+        "openai_stock_llm_fast": fast_model,
+        "openai_stock_llm_search": search_model,
+        "openai_stock_llm_cheap": cheap_model,
+    }
+
+
+def _is_openai_llm_alias(model_name: str) -> bool:
+    normalized = str(model_name or "").strip().lower()
+    return normalized in OPENAI_STOCK_MODEL_ALIASES_SET
+
+
+def _resolve_openai_llm_model(model_name: str, settings) -> str:
+    normalized = str(model_name or "").strip().lower()
+    alias_map = _openai_model_alias_map(settings)
+    resolved = alias_map.get(normalized) or alias_map["openai_stock_llm"]
+    return str(resolved or FAST_MODEL).strip()
+
+
+def _resolve_openai_predict_base_url(settings, llm_model_name: str) -> str:
+    configured = str(settings.openai_predict_base_url or "").strip().rstrip("/")
+    if not configured:
+        configured = "https://api.openai.com/v1"
+    if "/" in str(llm_model_name) and "api.openai.com" in configured:
+        return "https://openrouter.ai/api/v1"
+    return configured
+
+
+def _predict_symbol_with_openai(row: pd.Series, settings, horizon_days: int, model_name: str | None = None) -> dict:
     symbol = str(row.get("symbol") or "").upper().strip()
     sentiment = _safe_float(row.get("sentiment_same_day"), 0.0) or 0.0
     current_price = _safe_float(row.get("close"), 0.0) or 0.0
@@ -309,9 +355,10 @@ def _predict_symbol_with_openai(row: pd.Series, settings, horizon_days: int) -> 
         "latest_sentiment": sentiment,
     }
 
-    url = str(settings.openai_predict_base_url).rstrip("/") + "/chat/completions"
+    llm_model_name = str(model_name or settings.openai_predict_model_name or FAST_MODEL).strip()
+    url = _resolve_openai_predict_base_url(settings, llm_model_name).rstrip("/") + "/chat/completions"
     request_payload = {
-        "model": str(settings.openai_predict_model_name),
+        "model": llm_model_name,
         "temperature": float(settings.openai_predict_temperature),
         "response_format": {"type": "json_object"},
         "messages": [
@@ -353,6 +400,7 @@ def _predict_symbol_with_openai(row: pd.Series, settings, horizon_days: int) -> 
         "latest_sentiment": sentiment,
         "decision": decision,
         "llm_reason": str(pred.get("reason") or ""),
+        "llm_model": llm_model_name,
     }
 
 
@@ -553,12 +601,17 @@ def predict_for_symbols(
         latest["decision"] = np.where(latest["signal"].isin(["bullish", "watch"]), "BUY_CANDIDATE", "HOLD")
         latest["prediction_time"] = prediction_time.isoformat() if prediction_time else None
         latest["interval"] = str(settings.historical_interval)
-    elif normalized_model_name == "openai_stock_llm":
+    elif _is_openai_llm_alias(normalized_model_name):
         if not settings.openai_predict_enabled:
             raise ValueError("OpenAI predictor is disabled. Set OPENAI_PREDICT_ENABLED=true.")
-        llm_rows = [_predict_symbol_with_openai(row, settings, int(horizon_days)) for _, row in latest.iterrows()]
+        resolved_llm_model = _resolve_openai_llm_model(normalized_model_name, settings)
+        llm_rows = [
+            _predict_symbol_with_openai(row, settings, int(horizon_days), model_name=resolved_llm_model)
+            for _, row in latest.iterrows()
+        ]
         llm_df = pd.DataFrame(llm_rows)
         latest = latest.merge(llm_df, on="symbol", how="left")
+        model_version = resolved_llm_model
     else:
         model_path = _latest_model_path(settings.model_dir, model_name)
         metadata_path = _metadata_path_from_model(model_path)

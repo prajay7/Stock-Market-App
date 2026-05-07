@@ -15,6 +15,7 @@ from plotly.subplots import make_subplots
 import ta
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from app.core.constants import OPENAI_STOCK_MODEL_ALIASES_SET
 from src.inference.predict import predict_for_symbols
 
 logger = logging.getLogger(__name__)
@@ -497,11 +498,17 @@ def _get_available_models(model_dir: Path) -> list[str]:
     if not model_dir.exists():
         return []
     
-    preferred = ["xgboost_classifier", "openai_stock_llm"]
+    preferred = [
+        "xgboost_classifier",
+        "openai_stock_llm_fast",
+        "openai_stock_llm",
+        "openai_stock_llm_search",
+        "openai_stock_llm_cheap",
+    ]
     models = set()
     for model_name in preferred:
         candidates = list(model_dir.glob(f"{model_name}_*.joblib"))
-        if candidates or model_name == "openai_stock_llm":
+        if candidates or model_name in OPENAI_STOCK_MODEL_ALIASES_SET:
             models.add(model_name)
     
     return [model_name for model_name in preferred if model_name in models] if models else ["xgboost_classifier"]
@@ -509,7 +516,7 @@ def _get_available_models(model_dir: Path) -> list[str]:
 
 def _get_trained_symbols_for_model(model_dir: Path, model_name: str) -> list[str]:
     """Get symbols trained for a specific model."""
-    if not model_dir.exists() or model_name == "openai_stock_llm":
+    if not model_dir.exists() or model_name in OPENAI_STOCK_MODEL_ALIASES_SET:
         return []
     
     symbols = set()

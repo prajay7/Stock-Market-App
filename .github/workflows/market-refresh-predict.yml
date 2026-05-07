@@ -11,7 +11,7 @@ on:
         required: false
         default: ""
       model_name:
-        description: "Prediction model (xgboost_classifier | movement_model | openai_stock_llm)"
+        description: "Prediction model (xgboost_classifier | movement_model | openai_stock_llm | openai_stock_llm_fast | openai_stock_llm_search | openai_stock_llm_cheap)"
         required: false
         default: "xgboost_classifier"
       horizon_days:
@@ -53,9 +53,9 @@ jobs:
       DEFAULT_SYMBOLS: ${{ vars.DEFAULT_SYMBOLS }}
       DATA_PROVIDER: ${{ vars.DATA_PROVIDER }}
       NEWS_PROVIDER: ${{ vars.NEWS_PROVIDER }}
-      HISTORICAL_INTERVAL: ${{ vars.HISTORICAL_INTERVAL }}
-      HISTORICAL_LOOKBACK_DAYS: ${{ vars.HISTORICAL_LOOKBACK_DAYS }}
-      MAX_NEWS_ITEMS_PER_SYMBOL: ${{ vars.MAX_NEWS_ITEMS_PER_SYMBOL }}
+      HISTORICAL_INTERVAL: ${{ vars.HISTORICAL_INTERVAL || '1d' }}
+      HISTORICAL_LOOKBACK_DAYS: ${{ vars.HISTORICAL_LOOKBACK_DAYS || '3650' }}
+      MAX_NEWS_ITEMS_PER_SYMBOL: ${{ vars.MAX_NEWS_ITEMS_PER_SYMBOL || '100' }}
       # Optional secrets
       ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
       POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}

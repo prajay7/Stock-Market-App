@@ -4,12 +4,19 @@ import json
 from pathlib import Path
 from typing import List
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.core.constants import OPENAI_CHEAP_MODEL, OPENAI_FAST_MODEL, OPENAI_SEARCH_MODEL
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_ignore_empty=True,
+    )
 
     app_name: str = "Stock AI Platform"
     app_version: str = "0.1.0"
@@ -59,7 +66,19 @@ class Settings(BaseSettings):
     market_close_time: str = "15:30"
 
     openai_predict_enabled: bool = False
-    openai_predict_model_name: str = "gpt-4o-mini"
+    openai_predict_model_name: str = OPENAI_FAST_MODEL
+    openai_fast_model_name: str = Field(
+        default=OPENAI_FAST_MODEL,
+        validation_alias=AliasChoices("FAST_MODEL", "OPENAI_FAST_MODEL_NAME"),
+    )
+    openai_search_model_name: str = Field(
+        default=OPENAI_SEARCH_MODEL,
+        validation_alias=AliasChoices("SEARCH_MODEL", "OPENAI_SEARCH_MODEL_NAME"),
+    )
+    openai_cheap_model_name: str = Field(
+        default=OPENAI_CHEAP_MODEL,
+        validation_alias=AliasChoices("CHEAP_MODEL", "OPENAI_CHEAP_MODEL_NAME"),
+    )
     openai_predict_base_url: str = "https://api.openai.com/v1"
     openai_predict_temperature: float = 0.0
     openai_predict_timeout_sec: float = 20.0

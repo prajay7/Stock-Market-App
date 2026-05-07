@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from app.core.constants import OPENAI_STOCK_MODEL_ALIASES_SET
 from src.inference.predict import predict_for_symbols, save_prediction_outputs
 from src.utils.symbols import load_symbols_from_csv
 
@@ -16,6 +17,12 @@ from src.utils.symbols import load_symbols_from_csv
 PREDICTION_UI_LOCK = threading.Lock()
 PREDICTION_UI_RUNS: dict[str, dict] = {}
 PREDICTION_UI_ACTIVE_RUN_ID: str | None = None
+OPENAI_PREDICTION_MODEL_OPTIONS = [
+    "openai_stock_llm_fast",
+    "openai_stock_llm",
+    "openai_stock_llm_search",
+    "openai_stock_llm_cheap",
+]
 
 
 def _color_diff(val):
@@ -297,12 +304,11 @@ def _start_background_prediction(
 
 @st.fragment
 def _render_prediction_controls(settings) -> None:
-    openai_model_name = "openai_stock_llm"
     movement_model_name = "movement_model"
 
     model_name = st.selectbox(
         "Model",
-        options=["xgboost_classifier", movement_model_name, openai_model_name],
+        options=["xgboost_classifier", movement_model_name] + OPENAI_PREDICTION_MODEL_OPTIONS,
         key="pred_model_name",
     )
     horizon_days = st.number_input("Horizon days", min_value=1, max_value=10, value=1, step=1, key="pred_horizon_days")
@@ -331,9 +337,19 @@ def _render_prediction_controls(settings) -> None:
         else:
             trained_symbols = sorted({str(sym).strip().upper() for sym in settings.default_symbols if str(sym).strip()})
         st.caption(f"Movement model universe size: {len(trained_symbols)} symbol(s).")
-    elif model_name == openai_model_name:
+    elif model_name in OPENAI_STOCK_MODEL_ALIASES_SET:
+        alias_to_model = {
+            "openai_stock_llm": str(settings.openai_predict_model_name or settings.openai_fast_model_name).strip(),
+            "openai_stock_llm_fast": str(settings.openai_fast_model_name).strip(),
+            "openai_stock_llm_search": str(settings.openai_search_model_name).strip(),
+            "openai_stock_llm_cheap": str(settings.openai_cheap_model_name).strip(),
+        }
+        resolved_provider_model = alias_to_model.get(str(model_name).strip(), str(settings.openai_predict_model_name).strip())
         trained_symbols = sorted({str(sym).strip().upper() for sym in settings.default_symbols if str(sym).strip()})
-        st.caption(f"OpenAI predictor universe size: {len(trained_symbols)} symbol(s) from DEFAULT_SYMBOLS.")
+        st.caption(
+            f"OpenRouter profile `{model_name}` -> `{resolved_provider_model}` | "
+            f"universe size: {len(trained_symbols)} symbol(s) from DEFAULT_SYMBOLS."
+        )
         if not settings.openai_predict_enabled:
             st.warning("OpenAI predictor is disabled. Set OPENAI_PREDICT_ENABLED=true in environment.")
     else:
@@ -392,7 +408,7 @@ def _render_prediction_controls(settings) -> None:
     selected_symbols = sorted(list(dict.fromkeys(selected_symbols)))
     st.caption(f"Selected symbols for prediction: {len(selected_symbols)}")
 
-    if model_name != openai_model_name:
+    if model_name not in OPENAI_STOCK_MODEL_ALIASES_SET:
         trained_set = set(trained_symbols)
         selected_symbols = [sym for sym in selected_symbols if sym in trained_set]
         st.caption(f"After trained-symbol filter: {len(selected_symbols)}")

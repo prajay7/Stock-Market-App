@@ -172,7 +172,7 @@ class AutomationService:
         if configured and configured.lower() != "auto":
             return configured
         if bool(self.settings.openai_predict_enabled):
-            return "openai_stock_llm"
+            return "openai_stock_llm_fast"
         return "xgboost_classifier"
 
     @staticmethod
