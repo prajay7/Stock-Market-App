@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 import streamlit as st
 import threading
 import uuid
 from datetime import datetime
 import time
+
+# Streamlit Cloud may execute this file with cwd at `dashboard/`, which can
+# hide repo-root packages (`app/`, `src/`). Ensure repo root is importable.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 # Global storage for background runs. Background threads must not access
 # `st.session_state` directly (it's not thread-safe). Store mutable run
