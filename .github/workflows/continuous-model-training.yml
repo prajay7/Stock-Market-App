@@ -28,7 +28,7 @@ on:
         default: "1d"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: continuous-model-training
@@ -60,6 +60,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -131,3 +133,33 @@ jobs:
             data/models/*.feature_importance.json
             data/outputs/training_pipeline_*.json
             logs/*
+
+      - name: Commit and push generated data/models
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          BRANCH="${GITHUB_REF_NAME:-main}"
+          git add -f -A data
+
+          if git diff --cached --quiet; then
+            echo "No generated updates to commit."
+            exit 0
+          fi
+
+          git commit -m "chore: auto-update trained models and scraped data [skip ci]"
+
+          for attempt in 1 2 3; do
+            echo "Push attempt ${attempt}/3"
+            if git pull --rebase origin "${BRANCH}" && git push origin "HEAD:${BRANCH}"; then
+              echo "Auto-push succeeded."
+              exit 0
+            fi
+            git rebase --abort || true
+            sleep 5
+          done
+
+          echo "::warning::Auto-push failed after retries. Training outputs are still available as workflow artifacts."
